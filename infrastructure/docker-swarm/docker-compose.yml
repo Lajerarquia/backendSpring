@@ -1,0 +1,224 @@
+version: '3.8'
+
+services:
+  # NGINX Load Balancer
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - levelup-network
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # Gestion Usuarios Service
+  gestion-usuarios:
+    image: levelup/gestion-usuarios:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://usuarios-db:3306/usuarios_db
+      - SPRING_DATASOURCE_USERNAME_FILE=/run/secrets/db_username
+      - SPRING_DATASOURCE_PASSWORD_FILE=/run/secrets/db_password
+    networks:
+      - levelup-network
+    secrets:
+      - db_username
+      - db_password
+    deploy:
+      mode: replicated
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Core Negocio Service
+  core-negocio:
+    image: levelup/core-negocio:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://core-db:3306/core_db
+      - SPRING_DATASOURCE_USERNAME_FILE=/run/secrets/db_username
+      - SPRING_DATASOURCE_PASSWORD_FILE=/run/secrets/db_password
+    networks:
+      - levelup-network
+    secrets:
+      - db_username
+      - db_password
+    deploy:
+      mode: replicated
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Carrito Service
+  carrito:
+    image: levelup/carrito:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://carrito-db:3306/carrito_db
+      - SPRING_DATASOURCE_USERNAME_FILE=/run/secrets/db_username
+      - SPRING_DATASOURCE_PASSWORD_FILE=/run/secrets/db_password
+      - AWS_REGION=us-east-1
+      - SQS_QUEUE_URL_FILE=/run/secrets/sqs_queue_url
+    networks:
+      - levelup-network
+    secrets:
+      - db_username
+      - db_password
+      - sqs_queue_url
+    deploy:
+      mode: replicated
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8083/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # MySQL for Usuarios (Local development)
+  usuarios-db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_DATABASE=usuarios_db
+      - MYSQL_ROOT_PASSWORD_FILE=/run/secrets/db_password
+      - MYSQL_USER_FILE=/run/secrets/db_username
+      - MYSQL_PASSWORD_FILE=/run/secrets/db_password
+    volumes:
+      - usuarios-db-data:/var/lib/mysql
+    networks:
+      - levelup-network
+    secrets:
+      - db_username
+      - db_password
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  # MySQL for Core (Local development)
+  core-db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_DATABASE=core_db
+      - MYSQL_ROOT_PASSWORD_FILE=/run/secrets/db_password
+      - MYSQL_USER_FILE=/run/secrets/db_username
+      - MYSQL_PASSWORD_FILE=/run/secrets/db_password
+    volumes:
+      - core-db-data:/var/lib/mysql
+    networks:
+      - levelup-network
+    secrets:
+      - db_username
+      - db_password
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  # MySQL for Carrito (Local development)
+  carrito-db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_DATABASE=carrito_db
+      - MYSQL_ROOT_PASSWORD_FILE=/run/secrets/db_password
+      - MYSQL_USER_FILE=/run/secrets/db_username
+      - MYSQL_PASSWORD_FILE=/run/secrets/db_password
+    volumes:
+      - carrito-db-data:/var/lib/mysql
+    networks:
+      - levelup-network
+    secrets:
+      - db_username
+      - db_password
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+networks:
+  levelup-network:
+    driver: overlay
+    attachable: true
+
+volumes:
+  usuarios-db-data:
+  core-db-data:
+  carrito-db-data:
+
+secrets:
+  db_username:
+    external: true
+  db_password:
+    external: true
+  sqs_queue_url:
+    external: true
